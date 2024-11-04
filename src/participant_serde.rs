@@ -6,7 +6,6 @@ use serde_with::serde_as;
 #[derive(Serialize, Deserialize)]
 pub struct ParticipantWrapper(#[serde(with = "participant_serde")] pub Participant);
 pub mod participant_serde {
-    use super::*;
     use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
     use frost_dalek::nizk::NizkOfSecretKey;
     use frost_dalek::Participant;

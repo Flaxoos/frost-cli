@@ -1,4 +1,3 @@
-use frost_dalek::IndividualPublicKey;
 use frost_dalek::precomputation::PublicCommitmentShareList;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -12,7 +11,7 @@ pub struct PublicCommitmentShareListWrapper(
 pub mod comshare_serde {
     use super::*;
     use curve25519_dalek::ristretto::CompressedRistretto;
-    use serde::de::{self, Deserializer, SeqAccess, Visitor};
+    use serde::de::{self, Deserializer};
     use serde::ser::SerializeStruct;
     use serde::Serializer;
 

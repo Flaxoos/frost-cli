@@ -1,4 +1,4 @@
-use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
+use curve25519_dalek::ristretto::{CompressedRistretto};
 use frost_dalek::IndividualPublicKey;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -12,9 +12,9 @@ pub struct IndividualPublicKeyWrapper(
 
 /// Serialization module for `IndividualPublicKey`
 pub mod individual_public_key_serde {
-    use frost_dalek::IndividualPublicKey;
     use super::*;
-    use serde::de::{self, Deserializer, Visitor};
+    use frost_dalek::IndividualPublicKey;
+    use serde::de::{self, Deserializer};
     use serde::ser::SerializeStruct;
     use serde::Serializer;
 

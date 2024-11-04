@@ -54,7 +54,7 @@ pub mod secret_share_serde {
             {
                 let mut shares = Vec::new();
 
-                while let Some(index) = seq.next_element::<u32>()? {
+                while let Some(_) = seq.next_element::<u32>()? {
                     // Deserialize the raw bytes for `SecretShare`
                     let raw_bytes: Vec<u8> = seq
                         .next_element()?

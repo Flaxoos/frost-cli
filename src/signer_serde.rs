@@ -1,4 +1,4 @@
-use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
+use curve25519_dalek::ristretto::{CompressedRistretto};
 use frost_dalek::signature::Signer;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -14,7 +14,7 @@ pub struct SignerWrapper(
 pub mod signer_serde {
     use super::*;
     use frost_dalek::signature::Signer;
-    use serde::de::{self, Deserializer, Visitor};
+    use serde::de::{self, Deserializer};
     use serde::ser::SerializeStruct;
     use serde::Serializer;
 

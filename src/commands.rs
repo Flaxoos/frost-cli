@@ -1,4 +1,6 @@
-use clap::{command, Parser, Subcommand};
+use clap::{command, value_parser, Parser, Subcommand};
+
+use crate::config::SHARES;
 #[derive(Parser)]
 #[command(author, version, about)]
 pub struct Cli {
@@ -8,8 +10,14 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    // CreateParticipant,
     StartSession {
-        #[arg(short, long)]
+        #[arg(
+            short, 
+            long, 
+            value_parser = value_parser!(u32).range(1..=SHARES as i64),
+            help = "The participant index must be between 1 and 5 (inclusive)"
+        )]
         participant_index: u32,
     },
 }
@@ -20,7 +28,7 @@ pub enum InteractiveCommands {
     /// Sign a message (assumes threshold participants are ready)
     Sign,
     /// Display available commands
-    Help,
+    // Help,
     /// Exit the session
     Exit,
 }
