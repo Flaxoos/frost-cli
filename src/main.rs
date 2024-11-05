@@ -474,7 +474,7 @@ async fn collect_my_secret_shares(participant_index: u32, n: u32) -> Result<Vec<
         if collector.len() < (n - 1) as usize {
             info!(
                 "Not enough secret shares. Found indexes [{}], needs {}",
-                collector.iter().map(|share| share.0.to_string()).join(","),
+                collector.iter().map(|share| share.0.to_string()).join(", "),
                 n - 1
             );
             sleep(HEART_BEAT).await;
@@ -484,7 +484,7 @@ async fn collect_my_secret_shares(participant_index: u32, n: u32) -> Result<Vec<
     }
     info!(
         "Collected secret shares for participant [{}]",
-        collector.iter().map(|share| share.0.to_string()).join(",")
+        collector.iter().map(|share| share.0.to_string()).join(", ")
     );
     Ok(collector.into_values().collect())
 }

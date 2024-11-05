@@ -1,7 +1,7 @@
 use crate::Result;
 use std::time::Duration;
 use tokio::fs;
-pub const SHARES: usize = 3;
+pub const SHARES: usize = 5;
 pub const THRESHOLD: u32 = 3;
 
 pub const MESSAGE: &[u8; 25] = b"Is it secret? is it safe?";
