@@ -146,7 +146,7 @@ pub enum Error {
     #[error("Misbehaving participant(s) detected: {0:?}")]
     MisbehavingDkg(Vec<u32>),
 
-    #[error("Misbehaving participant(s) detected: {0:?}")]
+    #[error("Misbehaving participant(s) in finalization detected: {0:?}")]
     MisbehavingFinalization(HashMap<u32, &'static str>),
 
     #[error("Insufficient number of secret shares provided or verification failed")]

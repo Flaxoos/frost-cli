@@ -397,27 +397,34 @@ async fn collect_other_participants(participant_index: u32, n: u32) -> Result<Ve
     Ok(collector)
 }
 
-async fn collect_my_secret_shares(participant_index: u32, parameters: Parameters) -> Result<Vec<SecretShare>> {
+async fn collect_my_secret_shares(my_index: u32, parameters: Parameters) -> Result<Vec<SecretShare>> {
     let mut collector: Vec<SecretShare> = vec![];
 
+    
     loop {
         // For all other participants
-        for i in (1..=parameters.n).filter(|i| *i != participant_index) {
-            match read_published_secret_shares(i).await {
+        for shared_by in (1..=parameters.n).filter(|i| *i != my_index) {
+            let index_to_take = if shared_by < my_index  {
+                my_index-2
+            } else {
+                my_index-1
+            } as usize;
+            match read_published_secret_shares(shared_by).await {
                 Ok(Some(secret_shares)) => {
-                    if let Some(my_secret_shares) = secret_shares.get(participant_index as usize) {
+                    if let Some(my_secret_shares) = secret_shares.get(index_to_take) {
+                        info!("Found my Secret share (index {}) in participant {}'s published secret shares", index_to_take, shared_by);
                         collector.push(my_secret_shares.clone());
                     } else {
-                        info!("My Secret share not found for in participant {}'s published secret shares, retrying...", i);
+                        info!("My Secret share (index {}) not found for in participant {}'s published secret shares, retrying...", index_to_take, shared_by);
                     }
                 }
                 Ok(None) => {
-                    info!("Secret shares of participant {} not found, retrying...", i);
+                    info!("Secret shares of participant {} not found, retrying...", shared_by);
                 }
                 Err(e) => {
                     error!(
                         "Error collecting secret shares for participant {}: {}",
-                        i, e
+                        shared_by, e
                     );
                     return Err(e);
                 }

@@ -15,12 +15,12 @@ use frost_dalek::precomputation::PublicCommitmentShareList;
 use frost_dalek::signature::{PartialThresholdSignature, Signer};
 use frost_dalek::{IndividualPublicKey, Participant};
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{debug, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
 use fs2::FileExt;
 use std::io;
@@ -37,7 +37,7 @@ pub async fn publish_participant(participant: &Participant) -> Result<()> {
     let wrapper = ParticipantWrapper(participant.clone());
     let serialized = bincode::serialize(&wrapper).unwrap();
     tokio::fs::write(&data_path, serialized).await?;
-    debug!("Participant {} saved to {}", participant.index, data_path);
+    info!("Participant {} saved to {}", participant.index, data_path);
     Ok(())
 }
 
@@ -45,7 +45,7 @@ pub async fn publish_their_secret_shares(
     participant_index: u32,
     secret_shares: &Vec<SecretShare>,
 ) -> Result<()> {
-    debug!(
+    info!(
         "Publishing secret shares for participant {}",
         participant_index
     );
@@ -53,9 +53,7 @@ pub async fn publish_their_secret_shares(
     // Prepare the data to write
     let mut buffer = Vec::new();
     for share in secret_shares {
-        let serialized = bincode::serialize(&SecretShareWrapper(share.clone())).map_err(|e| {
-            io::Error::new(io::ErrorKind::Other, format!("Serialization failed: {}", e))
-        })?;
+        let serialized = bincode::serialize(&SecretShareWrapper(share.clone()))?;
         buffer.extend_from_slice(&serialized); // Add serialized data
         buffer.push(b'\n'); // Add newline after each serialized share
     }
@@ -78,7 +76,7 @@ pub async fn publish_their_secret_shares(
         })?
         .await?;
 
-    debug!(
+    info!(
         "Secret shares [{}] for participant {} saved to {}",
         secret_shares
             .iter()
@@ -96,7 +94,7 @@ pub async fn publish_public_key(
     public_comshares: PublicCommitmentShareList,
     public_key: IndividualPublicKey,
 ) -> Result<()> {
-    debug!(
+    info!(
         "Publishing public key for participant {}",
         participant_index
     );
@@ -107,7 +105,7 @@ pub async fn publish_public_key(
         public_key: IndividualPublicKeyWrapper(public_key),
     };
     tokio::fs::write(&data_path, serde_json::to_string(&published_public_key)?).await?;
-    debug!(
+    info!(
         "Public key for participant {} saved to {}",
         participant_index, data_path
     );
@@ -115,23 +113,23 @@ pub async fn publish_public_key(
 }
 
 pub async fn has_aggregation_commenced() -> bool {
-    debug!("Checking if the aggregation task has been taken on");
+    info!("Checking if the aggregation task has been taken on");
 
     let data_path = get_signers_file_name().await;
     tokio::fs::metadata(&data_path).await.is_ok()
 }
 
 pub async fn notify_aggregation_commenced() -> Result<()> {
-    debug!("Notifying other participants that the aggregation task has been taken on");
+    info!("Notifying other participants that the aggregation task has been taken on");
     // First create the file to notify other participants that the aggregation task has been taken on
     let data_path = get_signers_file_name().await;
     File::create(data_path).await?;
-    debug!("Notified other participants that the aggregation task has been taken on");
+    info!("Notified other participants that the aggregation task has been taken on");
     Ok(())
 }
 
 pub async fn publish_signers(signers: &[Signer]) -> Result<()> {
-    debug!("Publishing signers");
+    info!("Publishing signers");
     if signers.is_empty() {
         todo!("Handle empty list of signers");
     }
@@ -140,7 +138,7 @@ pub async fn publish_signers(signers: &[Signer]) -> Result<()> {
     let signers_wrappers: Vec<SignerWrapper> = signers.iter().map(|x| SignerWrapper(*x)).collect();
     let serialized = bincode::serialize(&signers_wrappers).unwrap();
     tokio::fs::write(&data_path, serialized).await?;
-    debug!("Signers saved to {}", data_path);
+    info!("Signers saved to {}", data_path);
     Ok(())
 }
 
@@ -148,7 +146,7 @@ pub async fn publish_partial_signature(
     participant_index: u32,
     partial_threshold_signature: PartialThresholdSignature,
 ) -> Result<()> {
-    debug!(
+    info!(
         "Publishing partial signature for participant {}",
         participant_index
     );
@@ -158,7 +156,7 @@ pub async fn publish_partial_signature(
         partial_threshold_signature,
     ))?;
     tokio::fs::write(&data_path, json.clone()).await?;
-    debug!(
+    info!(
         "Partial signature for participant {}, {} saved to {}",
         participant_index, json, data_path
     );
@@ -166,32 +164,32 @@ pub async fn publish_partial_signature(
 }
 
 pub async fn publish_finalized() -> Result<()> {
-    debug!("Publishing finalization confirmation");
+    info!("Publishing finalization confirmation");
 
     let data_path = get_finalized_file_name().await;
     tokio::fs::write(&data_path, FINALIZED).await?;
-    debug!("Finalization confirmation saved to {}", data_path);
+    info!("Finalization confirmation saved to {}", data_path);
     Ok(())
 }
 
 pub async fn publish_finalization_confirmation(participant_index: u32) -> Result<()> {
-    debug!("Publishing finalization confirmation");
+    info!("Publishing finalization confirmation");
 
     let data_path = get_finalization_confirmation_file_name(participant_index).await;
     tokio::fs::write(&data_path, CONFIRMED).await?;
-    debug!("Finalization confirmation saved to {}", data_path);
+    info!("Finalization confirmation saved to {}", data_path);
     Ok(())
 }
 
 pub async fn read_published_participant(participant_index: u32) -> Result<Option<Participant>> {
     let data_path = get_published_participant_file_name(participant_index).await;
-    debug!("Reading published participant data from {}", data_path);
+    info!("Reading published participant data from {}", data_path);
     if !fs::metadata(&data_path).await.is_ok() {
         return Ok(None);
     }
     let data = fs::read(&data_path).await?;
     let participant_wrapper: ParticipantWrapper = bincode::deserialize(&data)?;
-    debug!("Read published participant {}", participant_index);
+    info!("Read published participant {}", participant_index);
     Ok(Some(participant_wrapper.0))
 }
 
@@ -199,7 +197,7 @@ pub async fn read_published_secret_shares(
     participant_index: u32,
 ) -> Result<Option<Vec<SecretShare>>> {
     let data_path = get_their_secret_shares_file_name(participant_index).await;
-    debug!("Reading published secret shares from {}", data_path);
+    info!("Reading published secret shares from {}", data_path);
 
     if !fs::metadata(&data_path).await.is_ok() {
         return Ok(None);
@@ -217,7 +215,7 @@ pub async fn read_published_secret_shares(
     for line in buffer.split(|&byte| byte == b'\n') {
         if !line.is_empty() {
             // Deserialize each line as a SecretShareWrapper, then extract the SecretShare
-            debug!("Deserializing secret share from {}", data_path);
+            trace!("Deserializing secret share from {}", data_path);
             let result = bincode::deserialize(line);
             if result.is_err() {
                 warn!(
@@ -228,12 +226,16 @@ pub async fn read_published_secret_shares(
                 return Ok(None);
             }
             let share_wrapper: SecretShareWrapper = result?;
-            debug!("Deserialized secret share from {}", share_wrapper.0.index);
+            trace!(
+                "Deserialized secret share index {} from {}",
+                share_wrapper.0.index,
+                data_path
+            );
             secret_shares.push(share_wrapper.0);
         }
     }
 
-    debug!(
+    info!(
         "Secret shares [{}] for participant {} read from {}",
         secret_shares_indexes_to_string(&secret_shares),
         participant_index,
@@ -247,13 +249,13 @@ pub async fn read_published_public_key(
     participant_index: u32,
 ) -> Result<Option<PublishedPublicKey>> {
     let data_path = get_public_key_file_name(participant_index).await;
-    debug!("Reading published public key from {}", data_path);
+    info!("Reading published public key from {}", data_path);
     if !fs::metadata(&data_path).await.is_ok() {
         return Ok(None);
     }
     let json = fs::read_to_string(&data_path).await?;
     let published_public_key: PublishedPublicKey = serde_json::from_str(&json)?;
-    debug!(
+    info!(
         "Read published public key for participant {} from {}",
         participant_index, data_path
     );
@@ -262,7 +264,7 @@ pub async fn read_published_public_key(
 
 pub async fn read_signers() -> Result<Option<Vec<Signer>>> {
     let data_path = get_signers_file_name().await;
-    debug!("Reading signers from {}", data_path);
+    info!("Reading signers from {}", data_path);
     if !fs::metadata(&data_path).await.is_ok() {
         return Ok(None);
     }
@@ -271,7 +273,7 @@ pub async fn read_signers() -> Result<Option<Vec<Signer>>> {
         return Ok(Some(vec![]));
     }
     let signers_wrapper: Vec<SignerWrapper> = bincode::deserialize(&data)?;
-    debug!("Read signers from {}", data_path);
+    info!("Read signers from {}", data_path);
     Ok(Some(signers_wrapper.into_iter().map(|s| s.0).collect()))
 }
 
@@ -279,17 +281,17 @@ pub async fn read_partial_signature(
     participant_index: u32,
 ) -> Result<Option<PartialThresholdSignature>> {
     let data_path = get_partial_signature_file_name(participant_index).await;
-    debug!("Reading partial signature from {}", data_path);
+    info!("Reading partial signature from {}", data_path);
     if !fs::metadata(&data_path).await.is_ok() {
         return Ok(None);
     }
     let json = fs::read_to_string(&data_path).await?;
-    debug!(
+    info!(
         "Read raw partial signature for participant {} from {}",
         participant_index, data_path
     );
     let partial_sig_wrapper: PartialThresholdSignatureWrapper = serde_json::from_str(&json)?;
-    debug!(
+    info!(
         "Read partial signature for participant {} from {}",
         participant_index, data_path
     );
@@ -298,18 +300,18 @@ pub async fn read_partial_signature(
 
 pub async fn read_finalized() -> Result<Option<bool>> {
     let data_path = get_finalized_file_name().await;
-    debug!("Reading finalized status from {}", data_path);
+    info!("Reading finalized status from {}", data_path);
     if !fs::metadata(&data_path).await.is_ok() {
         return Ok(None);
     }
     let text = fs::read_to_string(&data_path).await?;
-    debug!("Read finalized status from {}: {}", data_path, text);
+    info!("Read finalized status from {}: {}", data_path, text);
     Ok(Some(text == FINALIZED))
 }
 
 pub async fn read_finalization_confirmation(participant_index: u32) -> Result<Option<bool>> {
     let data_path = get_finalization_confirmation_file_name(participant_index).await;
-    debug!(
+    info!(
         "Reading finalization confirmation for participant {} from {}",
         participant_index, data_path
     );
@@ -317,7 +319,7 @@ pub async fn read_finalization_confirmation(participant_index: u32) -> Result<Op
         return Ok(None);
     }
     let text = fs::read_to_string(&data_path).await?;
-    debug!(
+    info!(
         "Read finalization confirmation for participant {} from {}: {}",
         participant_index, data_path, text
     );

@@ -7,8 +7,9 @@
 ENV_FILE=".env"
 
 # Set default values if arguments are not provided
-DEFAULT_SHARES=5
-DEFAULT_THRESHOLD=3
+DEFAULT_SHARES=3
+DEFAULT_THRESHOLD=2
+MIN_PARTICIPANTS=3
 
 # Check if SHARES and THRESHOLD arguments are provided
 if [ -z "$1" ]; then
@@ -26,8 +27,8 @@ else
 fi
 
 # Validate that SHARES is at least 5
-if [ "$NEW_SHARES" -lt 5 ]; then
-    echo "Error: SHARES must be at least 5."
+if [ "$NEW_SHARES" -lt "$MIN_PARTICIPANTS" ]; then
+    echo "Error: SHARES must be at least $MIN_PARTICIPANTS."
     exit 1
 fi
 
