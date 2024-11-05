@@ -28,7 +28,7 @@ use frost_dalek::{
 };
 use futures::stream::{FuturesUnordered, StreamExt};
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error};
 use rand::rngs::OsRng;
 use std::collections::HashMap;
 use std::io::{self, Write};
