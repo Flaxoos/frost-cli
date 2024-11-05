@@ -10,11 +10,11 @@ mod signer_serde;
 use crate::commands::{Cli, Commands};
 use crate::config::{get_shares, get_threshold, Error, Result, CONTEXT, HEART_BEAT, MESSAGE};
 use crate::data::{
-    has_aggregation_commenced, notify_aggregation_commenced, publish_finalized,
-    publish_partial_signature, publish_participant, publish_public_key, publish_signers,
-    publish_their_secret_shares, read_finalized, read_partial_signature,
-    read_published_participant, read_published_public_key, read_published_secret_shares,
-    read_signers, PublishedPublicKey,
+    get_ready_participants, has_aggregation_commenced, increment_ready_participants,
+    notify_aggregation_commenced, publish_finalized, publish_partial_signature,
+    publish_participant, publish_public_key, publish_signers, publish_their_secret_shares,
+    read_finalized, read_partial_signature, read_published_participant, read_published_public_key,
+    read_published_secret_shares, read_signers, PublishedPublicKey,
 };
 use clap::Parser;
 use curve25519_dalek::ristretto::RistrettoPoint;
@@ -125,33 +125,42 @@ async fn interactive_cli_loop(
             _ => {
                 info!("Checking if DKG is finished");
                 if dkg.is_finished() {
-                    info!("DKG is finished, publishing public key");
-                    let (gk, sk) = dkg.await??;
-                    let (public_comshares, mut secret_comshares) =
-                        generate_commitment_share_lists(&mut OsRng, participant_index, 1);
-                    let pk: IndividualPublicKey = (&sk).into();
-                    info!(
-                        "Publishing public key:\np_i: {}\npk: {}\ncomshares: {}",
-                        participant_index,
-                        hex::encode(public_key_to_string(&pk.share)),
-                        public_comshares_to_string(&public_comshares)
-                    );
-                    task::spawn(publish_public_key(participant_index, public_comshares, pk));
-                    let mut aggregator: Option<SignatureAggregator<Initial>> = None;
-                    if !has_aggregation_commenced().await {
-                        // Then i am the aggregator
-                        aggregator = Some(commence_aggregation(parameters, gk).await?);
-                    }
+                    match dkg.await?? {
+                        None => {
+                            info!("Enough participants are ready for signing, leaving signing session");
+                            break;
+                        }
+                        Some((gk, sk)) => {
+                            info!("DKG is finished, publishing public key");
+                            let (public_comshares, mut secret_comshares) =
+                                generate_commitment_share_lists(&mut OsRng, participant_index, 1);
+                            let pk: IndividualPublicKey = (&sk).into();
+                            info!(
+                                "Publishing public key:\np_i: {}\npk: {}\ncomshares: {}",
+                                participant_index,
+                                hex::encode(public_key_to_string(&pk.share)),
+                                public_comshares_to_string(&public_comshares)
+                            );
+                            task::spawn(publish_public_key(
+                                participant_index,
+                                public_comshares,
+                                pk,
+                            ));
+                            let mut aggregator: Option<SignatureAggregator<Initial>> = None;
+                            if !has_aggregation_commenced().await {
+                                // Then i am the aggregator
+                                aggregator = Some(commence_aggregation(parameters, gk).await?);
+                            }
 
-                    let signers = wait_for_signers(parameters.t).await?;
-                    info!(
-                        "Computing message hash: context {}, message {}",
-                        hex::encode(&CONTEXT[..]),
-                        hex::encode(&MESSAGE[..])
-                    );
-                    let message_hash = compute_message_hash(&CONTEXT[..], &MESSAGE[..]);
+                            let signers = wait_for_signers(parameters.t).await?;
+                            info!(
+                                "Computing message hash: context {}, message {}",
+                                hex::encode(&CONTEXT[..]),
+                                hex::encode(&MESSAGE[..])
+                            );
+                            let message_hash = compute_message_hash(&CONTEXT[..], &MESSAGE[..]);
 
-                    info!("Signing message: participant index {}, message hash {}, group key {}, secret shares {}, my commitment share index {} signers {}",
+                            info!("Signing message: participant index {}, message hash {}, group key {}, secret shares {}, my commitment share index {} signers {}",
                         participant_index,
                         hex::encode(&message_hash[..]),
                         hex::encode(&gk.to_bytes()),
@@ -159,39 +168,42 @@ async fn interactive_cli_loop(
                         0,
                         signers.len(),
                     );
-                    sign_message(
-                        participant_index,
-                        message_hash,
-                        sk,
-                        gk,
-                        &mut secret_comshares,
-                        signers.as_slice(),
-                    )
-                    .await?;
-                    info!("Message signed.");
+                            sign_message(
+                                participant_index,
+                                message_hash,
+                                sk,
+                                gk,
+                                &mut secret_comshares,
+                                signers.as_slice(),
+                            )
+                            .await?;
+                            info!("Message signed.");
 
-                    if let Some(mut aggregator) = aggregator {
-                        // Because i am the aggregator, finalize the aggregation
-                        for sig in collect_partial_signatures(parameters).await? {
-                            aggregator.include_partial_signature(sig);
+                            if let Some(mut aggregator) = aggregator {
+                                // Because i am the aggregator, finalize the aggregation
+                                for sig in collect_partial_signatures(parameters).await? {
+                                    aggregator.include_partial_signature(sig);
+                                }
+
+                                let aggregator =
+                                    finalize_aggregation(parameters.t, aggregator).await?;
+
+                                let sig = aggregator
+                                    .aggregate()
+                                    .map_err(|e| Error::MisbehavingFinalization(e))?;
+                                sig.verify(&gk, &message_hash).or(
+                                    // This is always failing, and the lib doesn't return information, so let's return ok
+                                    //Error::MisbehavingFinalization(HashMap::new())
+                                    Ok(()) as Result<()>,
+                                )?;
+                                publish_finalized().await?;
+                            }
+
+                            wait_for_finalization().await?;
+                            info!("Finalized!");
+                            break;
                         }
-
-                        let aggregator = finalize_aggregation(parameters.t, aggregator).await?;
-
-                        let sig = aggregator
-                            .aggregate()
-                            .map_err(|e| Error::MisbehavingFinalization(e))?;
-                        sig.verify(&gk, &message_hash).or(
-                            // This is always failing, and the lib doesn't return information, so let's return ok
-                            //Error::MisbehavingFinalization(HashMap::new())
-                            Ok(()) as Result<()>,
-                        )?;
-                        publish_finalized().await?;
                     }
-
-                    wait_for_finalization().await?;
-                    info!("Finalized!");
-                    break;
                 } else {
                     info!("Not enough participants are ready for signing.");
                 }
@@ -205,7 +217,7 @@ async fn generate_distributed_key<'a>(
     participant: Participant,
     participant_coefficients: Coefficients,
     parameters: Parameters,
-) -> Result<(GroupKey, SecretKey)> {
+) -> Result<Option<(GroupKey, SecretKey)>> {
     let participant_index = participant.index;
 
     let mut other_participants =
@@ -246,22 +258,28 @@ async fn generate_distributed_key<'a>(
         .cloned()
         .collect();
 
-    info!("DKG round 2 Starting");
+    if get_ready_participants().await? >= parameters.t {
+        info!("Enough participants are ready for signing");
+        Ok(None)
+    } else {
+        info!("DKG round 2 Starting");
 
-    let dkg = dkg
-        .to_round_two(my_secret_shares)
-        .map_err(|_| Error::InsufficientSecretShares)?;
-    let pk = participant
-        .public_key()
-        .expect("Participant has no public key, this shouldn't happen at this point");
-    info!(
-        "Finishing DKG with public key: {}",
-        public_key_to_string(pk)
-    );
-    let (group_key, secret_key) = dkg.finish(pk).map_err(|_| Error::DkgFinishFailure)?;
-    info!("Resulting group key: {}", hex::encode(group_key.to_bytes()));
-    println!("Ready to sign, press any key to continue");
-    Ok((group_key, secret_key))
+        let dkg = dkg
+            .to_round_two(my_secret_shares)
+            .map_err(|_| Error::InsufficientSecretShares)?;
+        let pk = participant
+            .public_key()
+            .expect("Participant has no public key, this shouldn't happen at this point");
+        info!(
+            "Finishing DKG with public key: {}",
+            public_key_to_string(pk)
+        );
+        let (group_key, secret_key) = dkg.finish(pk).map_err(|_| Error::DkgFinishFailure)?;
+        info!("Resulting group key: {}", hex::encode(group_key.to_bytes()));
+        increment_ready_participants().await?;
+        println!("Ready to sign, press any key to continue");
+        Ok(Some((group_key, secret_key)))
+    }
 }
 
 async fn wait_for_signers(t: u32) -> Result<Vec<Signer>> {

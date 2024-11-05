@@ -72,65 +72,14 @@ pub async fn get_partial_signature_file_name(participant_index: u32) -> String {
     )
 }
 
-#[allow(unused)]
-pub async fn get_finalization_confirmation_file_name(participant_index: u32) -> String {
-    ensure_data_dir().await;
-    format!(
-        "{}/participant_{}_finalization_confirmation.txt",
-        DATA_DIR, participant_index
-    )
+pub async fn get_ready_participants_file_path() -> String {
+    "data/ready_participants_count.txt".to_string()
 }
 
-#[allow(unused)]
 pub async fn get_finalized_file_name() -> String {
     ensure_data_dir().await;
     format!("{}/finalized.txt", DATA_DIR)
 }
-
-#[allow(unused)]
-pub async fn delete_my_files(i: u32) -> Result<()> {
-    let path = get_partial_signature_file_name(i).await;
-    if fs::metadata(path.clone()).await.is_ok() {
-        fs::remove_file(path).await?;
-    }
-
-    let path = get_public_key_file_name(i).await;
-    if fs::metadata(path.clone()).await.is_ok() {
-        fs::remove_file(path).await?;
-    }
-
-    let path = get_their_secret_shares_file_name(i).await;
-    if fs::metadata(path.clone()).await.is_ok() {
-        fs::remove_file(path).await?;
-    }
-
-    let path = get_published_participant_file_name(i).await;
-    if fs::metadata(path.clone()).await.is_ok() {
-        fs::remove_file(path).await?;
-    }
-    Ok(())
-}
-
-#[allow(unused)]
-pub async fn delete_common_files() -> Result<()> {
-    let path = get_signers_file_name().await;
-    if fs::metadata(path.clone()).await.is_ok() {
-        fs::remove_file(path).await?;
-    }
-
-    let path = get_finalized_file_name().await;
-    if fs::metadata(path.clone()).await.is_ok() {
-        fs::remove_file(path).await?;
-    }
-
-    let path = get_signers_file_name().await;
-    if fs::metadata(path.clone()).await.is_ok() {
-        fs::remove_file(path).await?;
-    }
-
-    Ok(())
-}
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("I/O error occurred: {0:?}")]
