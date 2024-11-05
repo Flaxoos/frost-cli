@@ -1,8 +1,8 @@
 use crate::comshare_serde::PublicCommitmentShareListWrapper;
 use crate::config::{
-    get_finalization_confirmation_file_name, get_finalized_file_name,
+    get_finalized_file_name,
     get_partial_signature_file_name, get_public_key_file_name, get_published_participant_file_name,
-    get_signers_file_name, get_their_secret_shares_file_name, CONFIRMED, FINALIZED,
+    get_signers_file_name, get_their_secret_shares_file_name, FINALIZED,
 };
 use crate::partial_sig_serde::PartialThresholdSignatureWrapper;
 use crate::participant_serde::ParticipantWrapper;
@@ -15,16 +15,14 @@ use frost_dalek::precomputation::PublicCommitmentShareList;
 use frost_dalek::signature::{PartialThresholdSignature, Signer};
 use frost_dalek::{IndividualPublicKey, Participant};
 use itertools::Itertools;
-use log::{debug, info, trace, warn};
+use log::{info, trace, warn};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
 use fs2::FileExt;
 use std::io;
-use std::io::Write;
+use std::io::{Read, Write};
 
 #[derive(Serialize, Deserialize)]
 pub struct PublishedPublicKey {
@@ -54,8 +52,9 @@ pub async fn publish_their_secret_shares(
     let mut buffer = Vec::new();
     for share in secret_shares {
         let serialized = bincode::serialize(&SecretShareWrapper(share.clone()))?;
-        buffer.extend_from_slice(&serialized); // Add serialized data
-        buffer.push(b'\n'); // Add newline after each serialized share
+        let length_prefix = (serialized.len() as u64).to_be_bytes();
+        buffer.extend_from_slice(&length_prefix);
+        buffer.extend_from_slice(&serialized);
     }
 
     // Lock, write, and unlock the file
@@ -67,7 +66,7 @@ pub async fn publish_their_secret_shares(
         .await
         .and_then(|file| {
             Ok(async move {
-                let mut file = file.into_std().await; // Convert to std::fs::File to use fs2 for locking
+                let mut file = file.into_std().await;
                 file.lock_exclusive()?;
                 file.write_all(&buffer)?;
                 file.unlock()?;
@@ -172,15 +171,6 @@ pub async fn publish_finalized() -> Result<()> {
     Ok(())
 }
 
-pub async fn publish_finalization_confirmation(participant_index: u32) -> Result<()> {
-    info!("Publishing finalization confirmation");
-
-    let data_path = get_finalization_confirmation_file_name(participant_index).await;
-    tokio::fs::write(&data_path, CONFIRMED).await?;
-    info!("Finalization confirmation saved to {}", data_path);
-    Ok(())
-}
-
 pub async fn read_published_participant(participant_index: u32) -> Result<Option<Participant>> {
     let data_path = get_published_participant_file_name(participant_index).await;
     info!("Reading published participant data from {}", data_path);
@@ -199,41 +189,41 @@ pub async fn read_published_secret_shares(
     let data_path = get_their_secret_shares_file_name(participant_index).await;
     info!("Reading published secret shares from {}", data_path);
 
-    if !fs::metadata(&data_path).await.is_ok() {
+    if !std::fs::metadata(&data_path).is_ok() {
         return Ok(None);
     }
 
-    let mut file = File::open(&data_path).await?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).await.unwrap();
-
-    if buffer.is_empty() {
-        return Ok(None);
-    }
-
+    let mut file = std::fs::File::open(&data_path)?;
     let mut secret_shares = Vec::new();
-    for line in buffer.split(|&byte| byte == b'\n') {
-        if !line.is_empty() {
-            // Deserialize each line as a SecretShareWrapper, then extract the SecretShare
-            trace!("Deserializing secret share from {}", data_path);
-            let result = bincode::deserialize(line);
-            if result.is_err() {
-                warn!(
-                    "Failed to deserialize secret share from {}: {:?}",
-                    data_path,
-                    result.err()
-                );
-                return Ok(None);
-            }
-            let share_wrapper: SecretShareWrapper = result?;
+
+    loop {
+        let mut length_prefix = [0u8; 8];
+        if file.read_exact(&mut length_prefix).is_err() {
+            break; // End of file reached
+        }
+
+        let length = u64::from_be_bytes(length_prefix) as usize;
+        let mut serialized_data = vec![0; length];
+        file.read_exact(&mut serialized_data)?;
+
+        let result = bincode::deserialize::<SecretShareWrapper>(&serialized_data);
+        if let Ok(share_wrapper) = result {
             trace!(
                 "Deserialized secret share index {} from {}",
                 share_wrapper.0.index,
                 data_path
             );
             secret_shares.push(share_wrapper.0);
+        } else {
+            warn!(
+                "Failed to deserialize secret share from {}: {:?}",
+                data_path,
+                result.err()
+            );
+            return Ok(None);
         }
     }
+
     info!(
         "Secret shares [{}] for participant {} read from {}",
         secret_shares.iter().map(|x| x.index).join(", "),
@@ -306,21 +296,4 @@ pub async fn read_finalized() -> Result<Option<bool>> {
     let text = fs::read_to_string(&data_path).await?;
     info!("Read finalized status from {}: {}", data_path, text);
     Ok(Some(text == FINALIZED))
-}
-
-pub async fn read_finalization_confirmation(participant_index: u32) -> Result<Option<bool>> {
-    let data_path = get_finalization_confirmation_file_name(participant_index).await;
-    info!(
-        "Reading finalization confirmation for participant {} from {}",
-        participant_index, data_path
-    );
-    if !fs::metadata(&data_path).await.is_ok() {
-        return Ok(None);
-    }
-    let text = fs::read_to_string(&data_path).await?;
-    info!(
-        "Read finalization confirmation for participant {} from {}: {}",
-        participant_index, data_path, text
-    );
-    Ok(Some(text == CONFIRMED))
 }

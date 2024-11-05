@@ -12,9 +12,9 @@ use crate::config::{get_shares, get_threshold, Error, Result, CONTEXT, HEART_BEA
 use crate::data::{
     has_aggregation_commenced, notify_aggregation_commenced, publish_finalized,
     publish_partial_signature, publish_participant, publish_public_key, publish_signers,
-    publish_their_secret_shares, read_finalization_confirmation, read_finalized,
-    read_partial_signature, read_published_participant, read_published_public_key,
-    read_published_secret_shares, read_signers, PublishedPublicKey,
+    publish_their_secret_shares, read_finalized, read_partial_signature,
+    read_published_participant, read_published_public_key, read_published_secret_shares,
+    read_signers, PublishedPublicKey,
 };
 use clap::Parser;
 use curve25519_dalek::ristretto::RistrettoPoint;
@@ -32,8 +32,6 @@ use log::{debug, error, info};
 use rand::rngs::OsRng;
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::iter::Map;
-use std::vec::IntoIter;
 use tokio::task;
 use tokio::time::sleep;
 
@@ -299,66 +297,6 @@ async fn wait_for_finalization() -> Result<()> {
     }
 }
 
-async fn wait_for_finalization_confirmation(participant_index: u32) -> Result<()> {
-    info!(
-        "Waiting for finalization confirmation for participant {}",
-        participant_index
-    );
-    loop {
-        match read_finalization_confirmation(participant_index).await? {
-            Some(true) => {
-                info!("Finalization confirmation received");
-                return Ok(());
-            }
-            Some(false) | None => {
-                // Finalization confirmation file not yet indicating true, or not available; retry after sleep
-                debug!("Finalization confirmation not yet complete, retrying...");
-                sleep(HEART_BEAT).await;
-            }
-        }
-    }
-}
-
-async fn collect_finalization_confirmation(parameters: Parameters) -> Result<()> {
-    info!("Collecting finalization confirmation");
-
-    let mut tasks = vec![];
-
-    for i in 1..=parameters.n {
-        let handle = task::spawn(async move {
-            info!(
-                "Waiting for finalization confirmation from participant {}",
-                i
-            );
-            loop {
-                match read_finalization_confirmation(i).await? {
-                    Some(true) => {
-                        info!("Finalization confirmation received from participant {}", i);
-                        return Ok(());
-                    }
-                    Some(false) | None => {
-                        debug!("Finalization confirmation not yet complete, retrying...");
-                        sleep(HEART_BEAT).await;
-                    }
-                }
-            }
-        });
-
-        tasks.push(handle);
-    }
-
-    for task in tasks {
-        match task.await? {
-            Ok(_) => {}
-            Err(e) => {
-                error!("Failed to read finalization confirmation: {}", e);
-                return Err(e);
-            }
-        }
-    }
-    Ok(())
-}
-
 async fn collect_other_participants(participant_index: u32, n: u32) -> Result<Vec<Participant>> {
     info!("Collecting other participants");
 
@@ -443,10 +381,10 @@ async fn collect_my_secret_shares(
         }
         if collector.len() < (parameters.t - 1) as usize {
             info!(
-                    "Not enough secret shares. Found [{}], needs {}",
-                    collector.values().map(|x| x.index).join(", "),
-                    parameters.t - 1
-                );
+                "Not enough secret shares. Found [{}], needs {}",
+                collector.values().map(|x| x.index).join(", "),
+                parameters.t - 1
+            );
             sleep(HEART_BEAT).await;
         } else {
             break;

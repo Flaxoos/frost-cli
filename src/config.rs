@@ -31,7 +31,6 @@ pub fn get_threshold() -> u32 {
 pub const MESSAGE: &[u8; 25] = b"Is it secret? is it safe?";
 pub const CONTEXT: &[u8; 28] = b"Keep it secret, keep it safe";
 pub const FINALIZED: &str = "finalized";
-pub const CONFIRMED: &str = "confirmed";
 pub const HEART_BEAT: Duration = Duration::from_secs(3);
 
 pub const DATA_DIR: &str = "data";
