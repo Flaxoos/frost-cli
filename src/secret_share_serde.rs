@@ -1,6 +1,4 @@
 use frost_dalek::keygen::SecretShare;
-use serde::de::Visitor;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A wrapper for serializing and deserializing `SecretShare` as raw bytes.
 pub struct SecretShareWrapper(pub SecretShare);
@@ -8,8 +6,8 @@ pub struct SecretShareWrapper(pub SecretShare);
 pub mod secret_share_serde {
     use crate::secret_share_serde::SecretShareWrapper;
     use frost_dalek::keygen::SecretShare;
-    use serde::de::{Deserializer, Error as SerdeError, SeqAccess, Visitor};
-    use serde::ser::{SerializeStruct, Serializer};
+    use serde::de::{Deserializer, Visitor};
+    use serde::ser::Serializer;
     use serde::{Deserialize, Serialize};
     use std::ptr;
     use std::{fmt, mem};

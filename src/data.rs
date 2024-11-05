@@ -1,8 +1,8 @@
 use crate::comshare_serde::PublicCommitmentShareListWrapper;
 use crate::config::{
-    delete_my_files, get_finalization_confirmation_file_name, get_finalized_file_name,
+    get_finalization_confirmation_file_name, get_finalized_file_name,
     get_partial_signature_file_name, get_public_key_file_name, get_published_participant_file_name,
-    get_signers_file_name, get_their_secret_shares_file_name, CONFIRMED, FINALIZED, HEART_BEAT,
+    get_signers_file_name, get_their_secret_shares_file_name, CONFIRMED, FINALIZED,
 };
 use crate::partial_sig_serde::PartialThresholdSignatureWrapper;
 use crate::participant_serde::ParticipantWrapper;
@@ -15,12 +15,12 @@ use frost_dalek::precomputation::PublicCommitmentShareList;
 use frost_dalek::signature::{PartialThresholdSignature, Signer};
 use frost_dalek::{IndividualPublicKey, Participant};
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::fs::File;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use tokio::io::AsyncWriteExt;
 
 use fs2::FileExt;
 use std::io;

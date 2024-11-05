@@ -9,7 +9,7 @@ mod secret_share_serde;
 mod signer_serde;
 use crate::commands::{Cli, Commands};
 use crate::config::{
-    get_shares, get_threshold, Error, Result, CONTEXT, DEFAULT_SHARES, DEFAULT_THRESHOLD,
+    get_shares, get_threshold, Error, Result, CONTEXT,
     HEART_BEAT, MESSAGE,
 };
 use crate::data::{
@@ -33,9 +33,8 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{debug, error, info};
 use rand::rngs::OsRng;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{self, Write};
-use thiserror::Error;
 use tokio::task;
 use tokio::time::sleep;
 
