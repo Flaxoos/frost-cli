@@ -62,7 +62,7 @@ async fn main() {
 }
 
 async fn start_session(participant_index: u32, parameters: Parameters) -> Result<()> {
-    info!(
+    println!(
         "Starting session for participant {}, parameters: {:#?}",
         participant_index, parameters
     );
@@ -73,7 +73,7 @@ async fn start_session(participant_index: u32, parameters: Parameters) -> Result
 
     interactive_cli_loop(participant, coefficients, parameters).await?;
 
-    info!("Session complete for participant {}", participant_index);
+    println!("Session complete for participant {}", participant_index);
     Ok(())
 }
 
@@ -81,7 +81,7 @@ fn create_participant(
     participant_index: u32,
     parameters: &Parameters,
 ) -> (Participant, Coefficients) {
-    info!("Creating participant {}", participant_index);
+    println!("Creating participant {}", participant_index);
 
     let (participant, coefficients) = Participant::new(parameters, participant_index);
 
@@ -95,7 +95,7 @@ async fn interactive_cli_loop(
 ) -> Result<()> {
     let participant_index = participant.index;
 
-    info!("Starting DKG for participant {}", participant_index);
+    println!("Starting DKG for participant {}", participant_index);
     let dkg = task::spawn(generate_distributed_key(
         participant,
         participant_coefficients,
@@ -123,19 +123,19 @@ async fn interactive_cli_loop(
                 break;
             }
             _ => {
-                info!("Checking if DKG is finished");
+                println!("Checking if DKG is finished");
                 if dkg.is_finished() {
                     match dkg.await?? {
                         None => {
-                            info!("Enough participants are ready for signing, leaving signing session");
+                            println!("Enough participants are ready for signing, leaving signing session");
                             break;
                         }
                         Some((gk, sk)) => {
-                            info!("DKG is finished, publishing public key");
+                            println!("DKG is finished, publishing public key");
                             let (public_comshares, mut secret_comshares) =
                                 generate_commitment_share_lists(&mut OsRng, participant_index, 1);
                             let pk: IndividualPublicKey = (&sk).into();
-                            info!(
+                            println!(
                                 "Publishing public key:\np_i: {}\npk: {}\ncomshares: {}",
                                 participant_index,
                                 hex::encode(public_key_to_string(&pk.share)),
@@ -153,14 +153,14 @@ async fn interactive_cli_loop(
                             }
 
                             let signers = wait_for_signers(parameters.t).await?;
-                            info!(
+                            println!(
                                 "Computing message hash: context {}, message {}",
                                 hex::encode(&CONTEXT[..]),
                                 hex::encode(&MESSAGE[..])
                             );
                             let message_hash = compute_message_hash(&CONTEXT[..], &MESSAGE[..]);
 
-                            info!("Signing message: participant index {}, message hash {}, group key {}, secret shares {}, my commitment share index {} signers {}",
+                            println!("Signing message: participant index {}, message hash {}, group key {}, secret shares {}, my commitment share index {} signers {}",
                         participant_index,
                         hex::encode(&message_hash[..]),
                         hex::encode(&gk.to_bytes()),
@@ -177,7 +177,7 @@ async fn interactive_cli_loop(
                                 signers.as_slice(),
                             )
                             .await?;
-                            info!("Message signed.");
+                            println!("Message signed.");
 
                             if let Some(mut aggregator) = aggregator {
                                 // Because i am the aggregator, finalize the aggregation
@@ -192,7 +192,7 @@ async fn interactive_cli_loop(
                                     .aggregate()
                                     .map_err(|e| Error::MisbehavingFinalization(e))?;
                                 sig.verify(&gk, &message_hash).or(
-                                    // This is always failing, and the lib doesn't return information, so let's return ok
+                                    // This is always failing, and the lib doesn't return printlnrmation, so let's return ok
                                     //Error::MisbehavingFinalization(HashMap::new())
                                     Ok(()) as Result<()>,
                                 )?;
@@ -200,12 +200,12 @@ async fn interactive_cli_loop(
                             }
 
                             wait_for_finalization().await?;
-                            info!("Finalized!");
+                            println!("Finalized!");
                             break;
                         }
                     }
                 } else {
-                    info!("Not enough participants are ready for signing.");
+                    println!("Not enough participants are ready for signing.");
                 }
             }
         }
@@ -224,7 +224,7 @@ async fn generate_distributed_key<'a>(
         collect_other_participants(participant_index, parameters.n).await?;
 
     // No need to do verification as it is already done in the DKG round 1
-    info!(
+    println!(
         "DKG round 1 starting. other participants: {}",
         other_participants
             .iter()
@@ -244,7 +244,7 @@ async fn generate_distributed_key<'a>(
         if their_secret_shares.is_empty() {
             panic!("No other participants")
         }
-        info!(
+        println!(
             "Publishing their secret shares: [{}]",
             their_secret_shares.iter().map(|x| x.index).join(", ")
         );
@@ -259,10 +259,10 @@ async fn generate_distributed_key<'a>(
         .collect();
 
     if get_ready_participants().await? >= parameters.t {
-        info!("Enough participants are ready for signing");
+        println!("Enough participants are ready for signing");
         Ok(None)
     } else {
-        info!("DKG round 2 Starting");
+        println!("DKG round 2 Starting");
 
         let dkg = dkg
             .to_round_two(my_secret_shares)
@@ -270,12 +270,12 @@ async fn generate_distributed_key<'a>(
         let pk = participant
             .public_key()
             .expect("Participant has no public key, this shouldn't happen at this point");
-        info!(
+        println!(
             "Finishing DKG with public key: {}",
             public_key_to_string(pk)
         );
         let (group_key, secret_key) = dkg.finish(pk).map_err(|_| Error::DkgFinishFailure)?;
-        info!("Resulting group key: {}", hex::encode(group_key.to_bytes()));
+        println!("Resulting group key: {}", hex::encode(group_key.to_bytes()));
         increment_ready_participants().await?;
         println!("Ready to sign, press any key to continue");
         Ok(Some((group_key, secret_key)))
@@ -283,11 +283,11 @@ async fn generate_distributed_key<'a>(
 }
 
 async fn wait_for_signers(t: u32) -> Result<Vec<Signer>> {
-    info!("Waiting for signers");
+    println!("Waiting for signers");
     loop {
         match read_signers().await? {
             Some(signers) if (signers.len() as u32) >= t => {
-                info!("Collected sufficient signers");
+                println!("Collected sufficient signers");
                 return Ok(signers);
             }
             _ => {
@@ -299,11 +299,11 @@ async fn wait_for_signers(t: u32) -> Result<Vec<Signer>> {
 }
 
 async fn wait_for_finalization() -> Result<()> {
-    info!("Waiting for finalization");
+    println!("Waiting for finalization");
     loop {
         match read_finalized().await? {
             Some(true) => {
-                info!("Finalization completed");
+                println!("Finalization completed");
                 return Ok(());
             }
             Some(false) | None => {
@@ -316,18 +316,18 @@ async fn wait_for_finalization() -> Result<()> {
 }
 
 async fn collect_other_participants(participant_index: u32, n: u32) -> Result<Vec<Participant>> {
-    info!("Collecting other participants");
+    println!("Collecting other participants");
 
     let mut tasks = vec![];
 
     for i in 1..=n {
         if i != participant_index {
             let handle = task::spawn(async move {
-                info!("Waiting for participant {}", i);
+                println!("Waiting for participant {}", i);
                 loop {
                     match read_published_participant(i).await? {
                         Some(participant) => {
-                            info!("Collected participant {}", i);
+                            println!("Collected participant {}", i);
                             return Ok(participant); // Return the participant if found
                         }
                         None => {
@@ -376,14 +376,14 @@ async fn collect_my_secret_shares(
             match read_published_secret_shares(shared_by).await {
                 Ok(Some(secret_shares)) => {
                     if let Some(my_secret_share) = secret_shares.get(index_to_take) {
-                        info!("Found my Secret share (index {}) in participant {}'s published secret shares", index_to_take, shared_by);
+                        println!("Found my Secret share (index {}) in participant {}'s published secret shares", index_to_take, shared_by);
                         collector.insert(shared_by, my_secret_share.clone());
                     } else {
-                        info!("My Secret share (index {}) not found for in participant {}'s published secret shares, retrying...", index_to_take, shared_by);
+                        println!("My Secret share (index {}) not found for in participant {}'s published secret shares, retrying...", index_to_take, shared_by);
                     }
                 }
                 Ok(None) => {
-                    info!(
+                    println!(
                         "Secret shares of participant {} not found, retrying...",
                         shared_by
                     );
@@ -398,7 +398,7 @@ async fn collect_my_secret_shares(
             }
         }
         if collector.len() < (parameters.t - 1) as usize {
-            info!(
+            println!(
                 "Not enough secret shares. Found [{}], needs {}",
                 collector.values().map(|x| x.index).join(", "),
                 parameters.t - 1
@@ -408,7 +408,7 @@ async fn collect_my_secret_shares(
             break;
         }
     }
-    info!(
+    println!(
         "Collected secret shares [{}]",
         collector.values().map(|x| x.index).join(", ")
     );
@@ -421,11 +421,11 @@ async fn collect_published_pks(parameters: Parameters) -> Result<Vec<PublishedPu
     // Spawn a task for each participant's public key
     for i in 1..=parameters.n {
         let handle = task::spawn(async move {
-            info!("Waiting for published public key of participant {}", i);
+            println!("Waiting for published public key of participant {}", i);
             loop {
                 match read_published_public_key(i).await? {
                     Some(public_key) => {
-                        info!("Collected published public key for participant {}", i);
+                        println!("Collected published public key for participant {}", i);
                         return Ok(public_key);
                     }
                     None => {
@@ -461,11 +461,11 @@ async fn collect_partial_signatures(
     // Spawn a task for each participant's public key
     for i in 1..=parameters.n {
         let handle = task::spawn(async move {
-            info!("Waiting for partial signature of participant {}", i);
+            println!("Waiting for partial signature of participant {}", i);
             loop {
                 match read_partial_signature(i).await? {
                     Some(partial_sig) => {
-                        info!("Collected partial signature for participant {}", i);
+                        println!("Collected partial signature for participant {}", i);
                         return Ok(partial_sig);
                     }
                     None => {
@@ -501,8 +501,8 @@ async fn sign_message(
     secret_shares: &mut SecretCommitmentShareList,
     signers: &[Signer],
 ) -> Result<()> {
-    info!("Signing message as participant {}", participant_index);
-    info!("Signing details: Participant index {}, message hash {}, group key {}, secret shares {}, my commitment share index {} signers {}",
+    println!("Signing message as participant {}", participant_index);
+    println!("Signing details: Participant index {}, message hash {}, group key {}, secret shares {}, my commitment share index {} signers {}",
         participant_index,
         hex::encode(message_hash),
         hex::encode(group_key.to_bytes()),
@@ -513,7 +513,7 @@ async fn sign_message(
     let partial = secret_key
         .sign(&message_hash, &group_key, secret_shares, 0, signers)
         .map_err(|e| Error::Signing(e))?;
-    info!(
+    println!(
         "Publishing partial signature for participant {}",
         participant_index
     );
@@ -525,10 +525,10 @@ async fn commence_aggregation<'a>(
     parameters: Parameters,
     group_key: GroupKey,
 ) -> Result<SignatureAggregator<Initial<'a>>> {
-    info!("Commencing aggregation");
+    println!("Commencing aggregation");
     notify_aggregation_commenced().await?;
 
-    info!(
+    println!(
         "Collecting signers: group key {}, context {}, message {}",
         hex::encode(group_key.to_bytes()),
         hex::encode(&CONTEXT[..]),
@@ -541,7 +541,7 @@ async fn commence_aggregation<'a>(
 
     published_pks.into_iter().for_each(|ppk| {
         let participant_index = ppk.public_key.0.index;
-        info!(
+        println!(
             "Including participant signer {} in aggregation",
             participant_index
         );
@@ -560,17 +560,17 @@ async fn finalize_aggregation<'a>(
     t: u32,
     aggregator: SignatureAggregator<Initial<'a>>,
 ) -> Result<SignatureAggregator<Finalized>> {
-    info!("{}: Finalizing aggregation", t);
+    println!("{}: Finalizing aggregation", t);
     loop {
         let remaining = aggregator.get_remaining_signers();
         if remaining.is_empty() {
-            info!("{}: All signers have signed, finalizing", t);
+            println!("{}: All signers have signed, finalizing", t);
             let finalized = aggregator
                 .finalize()
                 .expect("Finalize called before sufficient signers have signed");
             return Ok(finalized);
         } else {
-            info!(
+            println!(
                 "{}: Still waiting for {} signers to contribute: [{}]",
                 t,
                 remaining.len(),

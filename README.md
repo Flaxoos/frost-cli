@@ -1,48 +1,39 @@
-# CLI Tool for demonstrating the use of the rust FROST library
+# CLI Tool for demonstrating the use of the rust FROST library - Ido Flax
 
 ----
 
 ## Instructions
 - run `sh setup.sh {n} {t}`, where {n} is the number of shares and {t} is the threshold and `n >= 5` and `n >= t`, for example:
-```shell
-sh setup.sh 5 3
-```
-- Run `cargo run -- start-session --participant-index {participant_index}` for each participant where `participant_index` is the 1-indexed participant index, for example:
+    ```shell
+    sh setup.sh 5 3
+    ```
+- Run ```cargo run -- start-session --participant-index {participant_index}``` for each participant where `participant_index` is the 1-indexed participant index, for example:
 
-```cargo run --package zama -- start-session --participant-index 1```
+   ```cargo run --package zama -- start-session --participant-index 1```
+   
+   ```cargo run --package zama -- start-session --participant-index 2```
+   
+   ```cargo run --package zama -- start-session --participant-index 3```
+   
+   ```cargo run --package zama -- start-session --participant-index 4```
+   
+   ```cargo run --package zama -- start-session --participant-index 5```
 
-```cargo run --package zama -- start-session --participant-index 2```
+- Each participant would see messages reporting the key generation process and will be prompted to press any key to continue once their keygen is ready
 
-```cargo run --package zama -- start-session --participant-index 3```
+## Caveats
+- Currently any excess signers (n-t) will get errors, where as the others will get success message (WIP to prevent the excess signers from continuing)
+- Not handling all edge cases of user input atm, some input validation exists
 
-```cargo run --package zama -- start-session --participant-index 4```
+---
 
-```cargo run --package zama -- start-session --participant-index 5```
+## Issues With Library
+- The main issue is that there is no way to communicate between the signers, as the secret shares and public key are not serializable.
+As a workaround for that, this tool uses unsafe memory access to write the struct bytes to files, but this is not ideal and is prone to failures if the structs in the library change.
 
-### Your task is to demonstrate the use of this library by making a small CLI utility that uses the library to:
-- #### Generate a public key and at least 5 shares of the private key 
-- #### Dump these to disc
-- #### Use these to sign an arbitrary message.
-#### (Observe that threshold signing on a single machine defeats the purpose of threshold signing, but we are just interested in a demonstration of the library for this challenge.)
-
-
-### FROST: Flexible Round-Optimized
-#### Schnorr Threshold Signatures
-> Threshold signature schemes are a cryptographic primitive to facilitate joint ownership
-> over a private key by a set of participants, such that a threshold number of participants
-> must cooperate to issue a signature that can be verified by a single public key
-
-## Process according to [Chelsea Komlo](https://youtu.be/g3RX4IXAtrE?si=WGJnh-z_5ZlOsOQs&t=664):
-
-| Step    | Participant                                                                                                                                                                                                                        | Commitment Server                  | Signature Aggregator                                               |
-|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------|--------------------------------------------------------------------| 
-| Keygen | - Generate two nonces<br/> - Generate two commitments to these nonces<br/> - Store private commitments locally<br/> - Publish the public commitments to some place ==><br/>(all of the other parties or cached for later use) | <br/><br/><br/>- Store commitments |
-| Sign | <br/> <br/> <br/> Generate binding value, which is a hash with respect to the index for this participant, the message to be assigned and this b value which constitutes all of the commitments                                     | | - `B = map i in 1..t { (i, commitments[i]) }`<br/><== (message, B) |
-
-
-The main issue is that there isn't a distinguishing between a commitment and a partial signature
-- because a secret key is needed for signing, and because a secret key can only be obtained by completing the two stages of distributed key generation, it is impossible to complete the single stage round signature
-- The precomputation and partial signature approach is a single round approach
+- Additionally, there is no distinction between single and multi-round threshold signatures, it seems the two concepts are mixed, at least according to the crate docs.
+Specially, because a secret key is needed for signing, and because a secret key can only be obtained by completing the two stages of distributed key generation, it is impossible to complete the single stage round signature
+- 
 ### Lib doc issues:
 1) This is misleading, it seems to be a continuation of the previous part, but this is infact the single round approach 
     > **Precomputation and Partial Signatures**<br/><br/>
