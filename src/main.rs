@@ -1,18 +1,18 @@
 mod commands;
 mod comshare_serde;
 mod config;
+mod data;
 mod partial_sig_serde;
 mod participant_serde;
 mod public_key_serde;
-mod publish;
 mod secret_share_serde;
 mod signer_serde;
-
 use crate::commands::{Cli, Commands};
 use crate::config::{
-    delete_common_files, delete_my_files, CONTEXT, HEART_BEAT, MESSAGE, SHARES, THRESHOLD,
+    get_shares, get_threshold, Error, Result, CONTEXT, DEFAULT_SHARES, DEFAULT_THRESHOLD,
+    HEART_BEAT, MESSAGE,
 };
-use crate::publish::{
+use crate::data::{
     has_aggregation_commenced, notify_aggregation_commenced, publish_finalized,
     publish_partial_signature, publish_participant, publish_public_key, publish_signers,
     publish_their_secret_shares, read_finalization_confirmation, read_finalized,
@@ -21,6 +21,7 @@ use crate::publish::{
 };
 use clap::Parser;
 use curve25519_dalek::ristretto::RistrettoPoint;
+use dotenv::dotenv;
 use frost_dalek::keygen::{Coefficients, SecretShare};
 use frost_dalek::precomputation::{PublicCommitmentShareList, SecretCommitmentShareList};
 use frost_dalek::signature::{Finalized, Initial, PartialThresholdSignature, SecretKey, Signer};
@@ -37,40 +38,11 @@ use std::io::{self, Write};
 use thiserror::Error;
 use tokio::task;
 use tokio::time::sleep;
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("I/O error occurred: {0:?}")]
-    IO(#[from] tokio::io::Error),
-
-    #[error("Serialization/Deserialization error: {0:?}")]
-    Serde(#[from] serde_json::error::Error),
-
-    #[error("Bincode error: {0:?}")]
-    Bincode(#[from] bincode::Error),
-
-    #[error("Misbehaving participant(s) detected: {0:?}")]
-    MisbehavingDkg(Vec<u32>),
-
-    #[error("Misbehaving participant(s) detected: {0:?}")]
-    MisbehavingFinalization(HashMap<u32, &'static str>),
-
-    #[error("Insufficient number of secret shares provided or verification failed")]
-    InsufficientSecretShares,
-
-    #[error("Failed to complete DKG process")]
-    DkgFinishFailure,
-
-    #[error("Task join error: {0}")]
-    Task(#[from] task::JoinError),
-
-    #[error("Signing error: {0}")]
-    Signing(&'static str),
-}
-pub type Result<T> = std::result::Result<T, Error>;
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
+    dotenv().ok();
     let cli = Cli::parse();
 
     match match cli.command {
@@ -78,8 +50,8 @@ async fn main() {
             start_session(
                 participant_index,
                 Parameters {
-                    n: SHARES as u32,
-                    t: THRESHOLD,
+                    n: get_shares(),
+                    t: get_threshold(),
                 },
             )
             .await
@@ -95,9 +67,6 @@ async fn main() {
 
 async fn start_session(participant_index: u32, parameters: Parameters) -> Result<()> {
     info!("Starting session for participant {}", participant_index);
-
-    info!("Cleaning up my files.");
-    delete_my_files(participant_index).await?;
 
     let (participant, coefficients) = create_participant(participant_index, &parameters);
 
@@ -256,7 +225,7 @@ async fn generate_distributed_key<'a>(
         &mut other_participants,
     )
     .map_err(|e| Error::MisbehavingDkg(e))?;
-    
+
     if let Ok(their_secret_shares) = dkg.their_secret_shares() {
         if their_secret_shares.is_empty() {
             panic!("No other participants")
@@ -268,18 +237,14 @@ async fn generate_distributed_key<'a>(
         publish_their_secret_shares(participant_index, their_secret_shares).await?;
     };
 
-    
-    let my_secret_shares = collect_my_secret_shares(participant_index, parameters.n)
+    let my_secret_shares = collect_my_secret_shares(participant_index, parameters)
         .await?
         .iter()
-        // .sorted_by(|a, b| a.index.cmp(&b.index))
+        .sorted_by(|a, b| a.index.cmp(&b.index))
         .cloned()
         .collect();
 
-    info!(
-        "DKG round 2 Starting. My secret shares: [{}]",
-        secret_shares_indexes_to_string(&my_secret_shares)
-    );
+    info!("DKG round 2 Starting");
 
     let dkg = dkg
         .to_round_two(my_secret_shares)
@@ -433,49 +398,37 @@ async fn collect_other_participants(participant_index: u32, n: u32) -> Result<Ve
     Ok(collector)
 }
 
-async fn collect_my_secret_shares(participant_index: u32, n: u32) -> Result<Vec<SecretShare>> {
-    let mut collector: HashMap<u32, SecretShare> = HashMap::new();
+async fn collect_my_secret_shares(participant_index: u32, parameters: Parameters) -> Result<Vec<SecretShare>> {
+    let mut collector: Vec<SecretShare> = vec![];
 
     loop {
-        for i in 1..=n {
-            if i != participant_index {
-                match read_published_secret_shares(i).await {
-                    Ok(Some(secret_shares)) => {
-                        let my_secret_shares: Vec<SecretShare> = secret_shares
-                            .into_iter()
-                            .filter(|s| s.index != participant_index)
-                            .collect();
-
-                        info!(
-                            "Secret shares of participant {}: [{}]",
-                            i,
-                            secret_shares_indexes_to_string(&my_secret_shares)
-                        );
-
-                        for share in my_secret_shares {
-                            if !collector.contains_key(&share.index) {
-                                collector.insert(share.index, share);
-                            }
-                        }
+        // For all other participants
+        for i in (1..=parameters.n).filter(|i| *i != participant_index) {
+            match read_published_secret_shares(i).await {
+                Ok(Some(secret_shares)) => {
+                    if let Some(my_secret_shares) = secret_shares.get(participant_index as usize) {
+                        collector.push(my_secret_shares.clone());
+                    } else {
+                        info!("My Secret share not found for in participant {}'s published secret shares, retrying...", i);
                     }
-                    Ok(None) => {
-                        debug!("Secret shares of participant {} not found, retrying...", i);
-                    }
-                    Err(e) => {
-                        error!(
-                            "Error collecting secret shares for participant {}: {}",
-                            i, e
-                        );
-                        return Err(e);
-                    }
+                }
+                Ok(None) => {
+                    info!("Secret shares of participant {} not found, retrying...", i);
+                }
+                Err(e) => {
+                    error!(
+                        "Error collecting secret shares for participant {}: {}",
+                        i, e
+                    );
+                    return Err(e);
                 }
             }
         }
-        if collector.len() < (n - 1) as usize {
+        if collector.len() < (parameters.t - 1) as usize {
             info!(
-                "Not enough secret shares. Found indexes [{}], needs {}",
-                collector.iter().map(|share| share.0.to_string()).join(", "),
-                n - 1
+                "Not enough secret shares. Found {}, needs {}",
+                collector.len(),
+                parameters.t - 1
             );
             sleep(HEART_BEAT).await;
         } else {
@@ -483,10 +436,10 @@ async fn collect_my_secret_shares(participant_index: u32, n: u32) -> Result<Vec<
         }
     }
     info!(
-        "Collected secret shares for participant [{}]",
-        collector.iter().map(|share| share.0.to_string()).join(", ")
+        "Collected {} secret shares for participant",
+        collector.len()
     );
-    Ok(collector.into_values().collect())
+    Ok(collector)
 }
 
 async fn collect_published_pks(parameters: Parameters) -> Result<Vec<PublishedPublicKey>> {

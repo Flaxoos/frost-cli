@@ -1,3 +1,24 @@
+# CLI Tool for demonstrating the use of the rust FROST library
+
+----
+
+## Instructions
+- run `sh setup.sh {n} {t}`, where {n} is the number of shares and {t} is the threshold and `n >= 5` and `n >= t`, for example:
+```shell
+sh setup.sh 5 3
+```
+- Run `cargo run -- start-session --participant-index {participant_index}` for each participant where `participant_index` is the 1-indexed participant index, for example:
+
+```cargo run --package zama -- start-session --participant-index 1```
+
+```cargo run --package zama -- start-session --participant-index 2```
+
+```cargo run --package zama -- start-session --participant-index 3```
+
+```cargo run --package zama -- start-session --participant-index 4```
+
+```cargo run --package zama -- start-session --participant-index 5```
+
 ### Your task is to demonstrate the use of this library by making a small CLI utility that uses the library to:
 - #### Generate a public key and at least 5 shares of the private key 
 - #### Dump these to disc

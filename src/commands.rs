@@ -1,6 +1,5 @@
+use crate::config::get_shares;
 use clap::{command, value_parser, Parser, Subcommand};
-
-use crate::config::SHARES;
 #[derive(Parser)]
 #[command(author, version, about)]
 pub struct Cli {
@@ -15,7 +14,7 @@ pub enum Commands {
         #[arg(
             short, 
             long, 
-            value_parser = value_parser!(u32).range(1..=SHARES as i64),
+            value_parser = value_parser!(u32).range(1..=get_shares() as i64),
             help = "The participant index must be between 1 and 5 (inclusive)"
         )]
         participant_index: u32,
