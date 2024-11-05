@@ -29,6 +29,7 @@ The main issue is that there isn't a distinguishing between a commitment and a p
 2) The doc says that verification should be done by the participants, but it is also done in the DKG first round
 3) IndividualPublicKey::verify is unimplemented and it doesn't say it in it's doc
 4) Wrong documentation for `ThresholdSignature::verify`, returns `Result<(), ()>` instead of `Result<Vec<u32>, ()>`
+
 ```rust
 impl ThresholdSignature {
 /// Verify this [`ThresholdSignature`].
@@ -40,6 +41,18 @@ impl ThresholdSignature {
 /// of any misbehaving participants.
 pub fn verify(&self, group_key: &GroupKey, message_hash: &[u8; 64]) -> Result<(), ()> {
 
+```
+
+5) toRoundTwo should hanbdle sorting:
+```rust
+        for share in my_secret_shares.iter() {
+            // XXX TODO implement sorting for SecretShare and also for a new Commitment type
+            for (index, commitment) in self.state.their_commitments.iter() {
+                if index == &share.index {
+                    share.verify(commitment)?;
+                }
+            }
+        }
 ```
  
 ### Lib API issues:

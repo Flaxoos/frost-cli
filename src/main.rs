@@ -9,13 +9,15 @@ mod secret_share_serde;
 mod signer_serde;
 
 use crate::commands::{Cli, Commands};
-use crate::config::{delete_all_files, CONTEXT, HEART_BEAT, MESSAGE, SHARES, THRESHOLD};
+use crate::config::{
+    delete_common_files, delete_my_files, CONTEXT, HEART_BEAT, MESSAGE, SHARES, THRESHOLD,
+};
 use crate::publish::{
     has_aggregation_commenced, notify_aggregation_commenced, publish_finalized,
     publish_partial_signature, publish_participant, publish_public_key, publish_signers,
-    publish_their_secret_shares, read_finalized, read_partial_signature,
-    read_published_participant, read_published_public_key, read_signers, read_their_secret_shares,
-    PublishedPublicKey,
+    publish_their_secret_shares, read_finalization_confirmation, read_finalized,
+    read_partial_signature, read_published_participant, read_published_public_key,
+    read_published_secret_shares, read_signers, PublishedPublicKey,
 };
 use clap::Parser;
 use curve25519_dalek::ristretto::RistrettoPoint;
@@ -30,16 +32,15 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use itertools::Itertools;
 use log::{debug, error, info};
 use rand::rngs::OsRng;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
-use std::time::Duration;
 use thiserror::Error;
 use tokio::task;
 use tokio::time::sleep;
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("I/O error occurred: {0}")]
-    IO(#[from] io::Error),
+    #[error("I/O error occurred: {0:?}")]
+    IO(#[from] tokio::io::Error),
 
     #[error("Serialization/Deserialization error: {0:?}")]
     Serde(#[from] serde_json::error::Error),
@@ -53,7 +54,7 @@ pub enum Error {
     #[error("Misbehaving participant(s) detected: {0:?}")]
     MisbehavingFinalization(HashMap<u32, &'static str>),
 
-    #[error("Insufficient number of secret shares provided")]
+    #[error("Insufficient number of secret shares provided or verification failed")]
     InsufficientSecretShares,
 
     #[error("Failed to complete DKG process")]
@@ -93,8 +94,10 @@ async fn main() {
 }
 
 async fn start_session(participant_index: u32, parameters: Parameters) -> Result<()> {
-    delete_all_files(participant_index).await?;
     info!("Starting session for participant {}", participant_index);
+
+    info!("Cleaning up my files.");
+    delete_my_files(participant_index).await?;
 
     let (participant, coefficients) = create_participant(participant_index, &parameters);
 
@@ -154,6 +157,7 @@ async fn interactive_cli_loop(
             _ => {
                 info!("Checking if DKG is finished");
                 if dkg.is_finished() {
+                    info!("DKG is finished, publishing public key");
                     let (gk, sk) = dkg.await??;
                     let (public_comshares, mut secret_comshares) =
                         generate_commitment_share_lists(&mut OsRng, participant_index, 1);
@@ -215,7 +219,7 @@ async fn interactive_cli_loop(
                     }
 
                     wait_for_finalization().await?;
-                    print!("Finalized!");
+                    info!("Finalized!");
                     break;
                 } else {
                     info!("Not enough participants are ready for signing.");
@@ -225,19 +229,17 @@ async fn interactive_cli_loop(
     }
     Ok(())
 }
-async fn wait_todo(){
-    sleep(Duration::from_secs(0)).await;
-}
+
 async fn generate_distributed_key<'a>(
     participant: Participant,
     participant_coefficients: Coefficients,
     parameters: Parameters,
 ) -> Result<(GroupKey, SecretKey)> {
     let participant_index = participant.index;
-    
-    let mut other_participants = collect_other_participants(participant_index, parameters.n).await?;
 
-    wait_todo().await;
+    let mut other_participants =
+        collect_other_participants(participant_index, parameters.n).await?;
+
     // No need to do verification as it is already done in the DKG round 1
     info!(
         "DKG round 1 starting. other participants: {}",
@@ -254,8 +256,6 @@ async fn generate_distributed_key<'a>(
         &mut other_participants,
     )
     .map_err(|e| Error::MisbehavingDkg(e))?;
-
-    wait_todo().await;
     
     if let Ok(their_secret_shares) = dkg.their_secret_shares() {
         if their_secret_shares.is_empty() {
@@ -263,23 +263,22 @@ async fn generate_distributed_key<'a>(
         }
         info!(
             "Publishing their secret shares: [{}]",
-            their_secret_shares
-                .iter()
-                .map(|share| share.index.to_string())
-                .join(", ")
+            secret_shares_indexes_to_string(their_secret_shares)
         );
         publish_their_secret_shares(participant_index, their_secret_shares).await?;
     };
 
-    wait_todo().await;
-    let my_secret_shares = collect_my_secret_shares(participant_index, parameters.n).await?;
     
+    let my_secret_shares = collect_my_secret_shares(participant_index, parameters.n)
+        .await?
+        .iter()
+        // .sorted_by(|a, b| a.index.cmp(&b.index))
+        .cloned()
+        .collect();
+
     info!(
         "DKG round 2 Starting. My secret shares: [{}]",
-        my_secret_shares
-            .iter()
-            .map(|share| share.index.to_string())
-            .join(", ")
+        secret_shares_indexes_to_string(&my_secret_shares)
     );
 
     let dkg = dkg
@@ -330,6 +329,66 @@ async fn wait_for_finalization() -> Result<()> {
     }
 }
 
+async fn wait_for_finalization_confirmation(participant_index: u32) -> Result<()> {
+    info!(
+        "Waiting for finalization confirmation for participant {}",
+        participant_index
+    );
+    loop {
+        match read_finalization_confirmation(participant_index).await? {
+            Some(true) => {
+                info!("Finalization confirmation received");
+                return Ok(());
+            }
+            Some(false) | None => {
+                // Finalization confirmation file not yet indicating true, or not available; retry after sleep
+                debug!("Finalization confirmation not yet complete, retrying...");
+                sleep(HEART_BEAT).await;
+            }
+        }
+    }
+}
+
+async fn collect_finalization_confirmation(parameters: Parameters) -> Result<()> {
+    info!("Collecting finalization confirmation");
+
+    let mut tasks = vec![];
+
+    for i in 1..=parameters.n {
+        let handle = task::spawn(async move {
+            info!(
+                "Waiting for finalization confirmation from participant {}",
+                i
+            );
+            loop {
+                match read_finalization_confirmation(i).await? {
+                    Some(true) => {
+                        info!("Finalization confirmation received from participant {}", i);
+                        return Ok(());
+                    }
+                    Some(false) | None => {
+                        debug!("Finalization confirmation not yet complete, retrying...");
+                        sleep(HEART_BEAT).await;
+                    }
+                }
+            }
+        });
+
+        tasks.push(handle);
+    }
+
+    for task in tasks {
+        match task.await? {
+            Ok(_) => {}
+            Err(e) => {
+                error!("Failed to read finalization confirmation: {}", e);
+                return Err(e);
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn collect_other_participants(participant_index: u32, n: u32) -> Result<Vec<Participant>> {
     info!("Collecting other participants");
 
@@ -375,45 +434,59 @@ async fn collect_other_participants(participant_index: u32, n: u32) -> Result<Ve
 }
 
 async fn collect_my_secret_shares(participant_index: u32, n: u32) -> Result<Vec<SecretShare>> {
-    let mut tasks = vec![];
+    let mut collector: HashMap<u32, SecretShare> = HashMap::new();
 
-    for i in 1..=n {
-        if i != participant_index {
-            let handle = task::spawn(async move {
-                info!("Waiting for secret shares of participant {}", i);
-                loop {
-                    match read_their_secret_shares(i).await? {
-                        Some(secret_shares) if (secret_shares.len() as u32) == n - 1 => {
-                            // Filter to get only the shares for the participant_index
-                            let my_secret_shares: Vec<SecretShare> = secret_shares
-                                .into_iter()
-                                .filter(|share| share.index == participant_index)
-                                .collect();
-                            info!("Collected secret shares for participant {}", i);
-                            return Ok(my_secret_shares);
-                        }
-                        _ => {
-                            debug!("Secret shares of participant {} not found, retrying...", i);
-                            sleep(HEART_BEAT).await;
+    loop {
+        for i in 1..=n {
+            if i != participant_index {
+                match read_published_secret_shares(i).await {
+                    Ok(Some(secret_shares)) => {
+                        let my_secret_shares: Vec<SecretShare> = secret_shares
+                            .into_iter()
+                            .filter(|s| s.index != participant_index)
+                            .collect();
+
+                        info!(
+                            "Secret shares of participant {}: [{}]",
+                            i,
+                            secret_shares_indexes_to_string(&my_secret_shares)
+                        );
+
+                        for share in my_secret_shares {
+                            if !collector.contains_key(&share.index) {
+                                collector.insert(share.index, share);
+                            }
                         }
                     }
+                    Ok(None) => {
+                        debug!("Secret shares of participant {} not found, retrying...", i);
+                    }
+                    Err(e) => {
+                        error!(
+                            "Error collecting secret shares for participant {}: {}",
+                            i, e
+                        );
+                        return Err(e);
+                    }
                 }
-            });
-
-            tasks.push(handle);
+            }
+        }
+        if collector.len() < (n - 1) as usize {
+            info!(
+                "Not enough secret shares. Found indexes [{}], needs {}",
+                collector.iter().map(|share| share.0.to_string()).join(","),
+                n - 1
+            );
+            sleep(HEART_BEAT).await;
+        } else {
+            break;
         }
     }
-
-    // Await all tasks and collect results
-    let mut collector = vec![];
-    for task in tasks {
-        match task.await? {
-            Ok(my_secret_shares) => collector.extend(my_secret_shares),
-            Err(e) => return Err(e), // Return the error if any task fails
-        }
-    }
-
-    Ok(collector)
+    info!(
+        "Collected secret shares for participant [{}]",
+        collector.iter().map(|share| share.0.to_string()).join(",")
+    );
+    Ok(collector.into_values().collect())
 }
 
 async fn collect_published_pks(parameters: Parameters) -> Result<Vec<PublishedPublicKey>> {
@@ -615,4 +688,8 @@ fn public_comshares_to_string(s: &PublicCommitmentShareList) -> String {
 
 fn public_key_to_string(pk: &RistrettoPoint) -> String {
     hex::encode(pk.compress().to_bytes())
+}
+
+pub fn secret_shares_indexes_to_string(s: &Vec<SecretShare>) -> String {
+    s.iter().map(|x| x.index).join(", ")
 }
