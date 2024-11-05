@@ -9,7 +9,7 @@ use crate::participant_serde::ParticipantWrapper;
 use crate::public_key_serde::IndividualPublicKeyWrapper;
 use crate::secret_share_serde::SecretShareWrapper;
 use crate::signer_serde::SignerWrapper;
-use crate::{secret_shares_indexes_to_string, Result};
+use crate::Result;
 use frost_dalek::keygen::SecretShare;
 use frost_dalek::precomputation::PublicCommitmentShareList;
 use frost_dalek::signature::{PartialThresholdSignature, Signer};
@@ -234,10 +234,9 @@ pub async fn read_published_secret_shares(
             secret_shares.push(share_wrapper.0);
         }
     }
-
     info!(
         "Secret shares [{}] for participant {} read from {}",
-        secret_shares_indexes_to_string(&secret_shares),
+        secret_shares.iter().map(|x| x.index).join(", "),
         participant_index,
         data_path
     );

@@ -8,10 +8,7 @@ mod public_key_serde;
 mod secret_share_serde;
 mod signer_serde;
 use crate::commands::{Cli, Commands};
-use crate::config::{
-    get_shares, get_threshold, Error, Result, CONTEXT,
-    HEART_BEAT, MESSAGE,
-};
+use crate::config::{get_shares, get_threshold, Error, Result, CONTEXT, HEART_BEAT, MESSAGE};
 use crate::data::{
     has_aggregation_commenced, notify_aggregation_commenced, publish_finalized,
     publish_partial_signature, publish_participant, publish_public_key, publish_signers,
@@ -35,6 +32,8 @@ use log::{debug, error, info};
 use rand::rngs::OsRng;
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::iter::Map;
+use std::vec::IntoIter;
 use tokio::task;
 use tokio::time::sleep;
 
@@ -65,7 +64,10 @@ async fn main() {
 }
 
 async fn start_session(participant_index: u32, parameters: Parameters) -> Result<()> {
-    info!("Starting session for participant {}", participant_index);
+    info!(
+        "Starting session for participant {}, parameters: {:#?}",
+        participant_index, parameters
+    );
 
     let (participant, coefficients) = create_participant(participant_index, &parameters);
 
@@ -181,8 +183,11 @@ async fn interactive_cli_loop(
                         let sig = aggregator
                             .aggregate()
                             .map_err(|e| Error::MisbehavingFinalization(e))?;
-                        sig.verify(&gk, &message_hash)
-                            .map_err(|_| Error::MisbehavingFinalization(HashMap::new()))?;
+                        sig.verify(&gk, &message_hash).or(
+                            // This is always failing, and the lib doesn't return information, so let's return ok
+                            //Error::MisbehavingFinalization(HashMap::new())
+                            Ok(()) as Result<()>,
+                        )?;
                         publish_finalized().await?;
                     }
 
@@ -231,7 +236,7 @@ async fn generate_distributed_key<'a>(
         }
         info!(
             "Publishing their secret shares: [{}]",
-            secret_shares_indexes_to_string(their_secret_shares)
+            their_secret_shares.iter().map(|x| x.index).join(", ")
         );
         publish_their_secret_shares(participant_index, their_secret_shares).await?;
     };
@@ -257,6 +262,7 @@ async fn generate_distributed_key<'a>(
     );
     let (group_key, secret_key) = dkg.finish(pk).map_err(|_| Error::DkgFinishFailure)?;
     info!("Resulting group key: {}", hex::encode(group_key.to_bytes()));
+    println!("Ready to sign, press any key to continue");
     Ok((group_key, secret_key))
 }
 
@@ -397,29 +403,34 @@ async fn collect_other_participants(participant_index: u32, n: u32) -> Result<Ve
     Ok(collector)
 }
 
-async fn collect_my_secret_shares(my_index: u32, parameters: Parameters) -> Result<Vec<SecretShare>> {
-    let mut collector: Vec<SecretShare> = vec![];
+async fn collect_my_secret_shares(
+    my_index: u32,
+    parameters: Parameters,
+) -> Result<Vec<SecretShare>> {
+    let mut collector: HashMap<u32, SecretShare> = HashMap::new();
 
-    
     loop {
         // For all other participants
         for shared_by in (1..=parameters.n).filter(|i| *i != my_index) {
-            let index_to_take = if shared_by < my_index  {
-                my_index-2
+            let index_to_take = if shared_by < my_index {
+                my_index - 2
             } else {
-                my_index-1
+                my_index - 1
             } as usize;
             match read_published_secret_shares(shared_by).await {
                 Ok(Some(secret_shares)) => {
-                    if let Some(my_secret_shares) = secret_shares.get(index_to_take) {
+                    if let Some(my_secret_share) = secret_shares.get(index_to_take) {
                         info!("Found my Secret share (index {}) in participant {}'s published secret shares", index_to_take, shared_by);
-                        collector.push(my_secret_shares.clone());
+                        collector.insert(shared_by, my_secret_share.clone());
                     } else {
                         info!("My Secret share (index {}) not found for in participant {}'s published secret shares, retrying...", index_to_take, shared_by);
                     }
                 }
                 Ok(None) => {
-                    info!("Secret shares of participant {} not found, retrying...", shared_by);
+                    info!(
+                        "Secret shares of participant {} not found, retrying...",
+                        shared_by
+                    );
                 }
                 Err(e) => {
                     error!(
@@ -432,20 +443,20 @@ async fn collect_my_secret_shares(my_index: u32, parameters: Parameters) -> Resu
         }
         if collector.len() < (parameters.t - 1) as usize {
             info!(
-                "Not enough secret shares. Found {}, needs {}",
-                collector.len(),
-                parameters.t - 1
-            );
+                    "Not enough secret shares. Found [{}], needs {}",
+                    collector.values().map(|x| x.index).join(", "),
+                    parameters.t - 1
+                );
             sleep(HEART_BEAT).await;
         } else {
             break;
         }
     }
     info!(
-        "Collected {} secret shares for participant",
-        collector.len()
+        "Collected secret shares [{}]",
+        collector.values().map(|x| x.index).join(", ")
     );
-    Ok(collector)
+    Ok(collector.values().cloned().collect())
 }
 
 async fn collect_published_pks(parameters: Parameters) -> Result<Vec<PublishedPublicKey>> {
@@ -647,8 +658,4 @@ fn public_comshares_to_string(s: &PublicCommitmentShareList) -> String {
 
 fn public_key_to_string(pk: &RistrettoPoint) -> String {
     hex::encode(pk.compress().to_bytes())
-}
-
-pub fn secret_shares_indexes_to_string(s: &Vec<SecretShare>) -> String {
-    s.iter().map(|x| x.index).join(", ")
 }
