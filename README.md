@@ -1,4 +1,12 @@
-# CLI Tool for demonstrating the use of the rust [FROST](https://docs.rs/frost-dalek/latest/frost_dalek/) library
+# CLI for [FROST](https://docs.rs/frost-dalek/latest/frost_dalek/) (Flexible Round-Optimised Schnorr Threshold signatures) 
+
+This is a CLI tool meant to interact with and work around the issues and limitations of the [FROST](https://docs.rs/frost-dalek/latest/frost_dalek/) library, namely:
+
+- There is no way to communicate between the signers, as the secret shares and public key are not serializable.
+As a workaround for that, this tool uses unsafe memory access to write the struct bytes to files, but this is not ideal and is prone to failures if the structs in the library change.
+
+- Additionally, there is no distinction between single and multi-round threshold signatures, it seems the two concepts are mixed, at least according to the crate docs.
+Specially, because a secret key is needed for signing, and because a secret key can only be obtained by completing the two stages of distributed key generation, it is impossible to complete the single stage round signature
 
 ---
 
